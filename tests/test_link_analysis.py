@@ -6,11 +6,18 @@ client = TestClient(app)
 
 
 def test_root_health_check():
-    response = client.get("/")
+    response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
     assert "version" in data
+
+
+def test_ui_index_served():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Dxora AI Link Analyzer" in response.text
+
 
 
 def test_invalid_url_scheme():

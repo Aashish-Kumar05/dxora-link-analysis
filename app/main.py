@@ -1,5 +1,7 @@
+from pathlib import Path
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.schemas import LinkAnalysisRequest, LinkAnalysisResponse
@@ -26,11 +28,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static UI setup
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
 analysis_service = AnalysisService()
 
 
-@app.get("/", tags=["Health"])
+@app.get("/", tags=["UI"])
 async def root():
+    index_file = STATIC_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
     return {
         "status": "healthy",
         "service": "AI-Powered Website Link Analysis API",
@@ -39,6 +48,19 @@ async def root():
         "configured_llm_provider": settings.LLM_PROVIDER,
         "configured_model": settings.GROQ_MODEL if settings.LLM_PROVIDER == "groq" else settings.GEMINI_MODEL
     }
+
+
+@app.get("/health", tags=["Health"])
+async def health_check():
+    return {
+        "status": "healthy",
+        "service": "AI-Powered Website Link Analysis API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "configured_llm_provider": settings.LLM_PROVIDER,
+        "configured_model": settings.GROQ_MODEL if settings.LLM_PROVIDER == "groq" else settings.GEMINI_MODEL
+    }
+
 
 
 
