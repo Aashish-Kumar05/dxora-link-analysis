@@ -37,8 +37,9 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
         "configured_llm_provider": settings.LLM_PROVIDER,
-        "configured_model": settings.GEMINI_MODEL if settings.LLM_PROVIDER == "gemini" else settings.OPENAI_MODEL
+        "configured_model": settings.GROQ_MODEL if settings.LLM_PROVIDER == "groq" else settings.GEMINI_MODEL
     }
+
 
 
 @app.post(

@@ -9,12 +9,15 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # LLM Settings
-    LLM_PROVIDER: str = "gemini"  # "gemini", "openai", "mock"
+    LLM_PROVIDER: str = "groq"  # "groq", "gemini", "mock"
+    
+    # Groq Settings
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+
+    # Gemini Settings (Fallback)
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
-
-    OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o-mini"
 
     # Web Scraper Settings
     REQUEST_TIMEOUT: float = 15.0

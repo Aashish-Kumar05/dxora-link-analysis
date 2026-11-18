@@ -92,16 +92,31 @@ JSON Output Schema:
 class LLMService:
     def __init__(self):
         self.provider = settings.LLM_PROVIDER
+        self.groq_key = settings.GROQ_API_KEY
         self.gemini_key = settings.GEMINI_API_KEY
-        self.openai_key = settings.OPENAI_API_KEY
 
     async def analyze_content(self, extracted_data: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
         """
-        Routes analysis to the configured LLM provider (Gemini, OpenAI, or Mock).
+        Routes analysis to the configured LLM provider (Groq, Gemini, or Mock).
         Returns a tuple: (analysis_json, model_name_used).
         """
-        # Determine active provider
-        if self.provider == "gemini" and self.gemini_key:
+        # 1. Groq Provider (Primary choice)
+        if self.provider == "groq" and self.groq_key:
+            try:
+                result = await self._call_groq(extracted_data)
+                return result, settings.GROQ_MODEL
+            except Exception as e:
+                logger.error(f"Groq API call failed: {e}. Attempting fallback.")
+                if self.gemini_key:
+                    try:
+                        gemini_res = await self._call_gemini(extracted_data)
+                        return gemini_res, settings.GEMINI_MODEL
+                    except Exception as gem_e:
+                        logger.error(f"Gemini fallback also failed: {gem_e}.")
+                return self._generate_fallback_analysis(extracted_data), "fallback-heuristic-engine"
+
+        # 2. Gemini Provider
+        elif self.provider == "gemini" and self.gemini_key:
             try:
                 result = await self._call_gemini(extracted_data)
                 return result, settings.GEMINI_MODEL
@@ -109,20 +124,48 @@ class LLMService:
                 logger.error(f"Gemini API call failed: {e}. Falling back to smart analysis engine.")
                 return self._generate_fallback_analysis(extracted_data), "fallback-heuristic-engine"
 
-        elif self.provider == "openai" and self.openai_key:
-            try:
-                result = await self._call_openai(extracted_data)
-                return result, settings.OPENAI_MODEL
-            except Exception as e:
-                logger.error(f"OpenAI API call failed: {e}. Falling back to smart analysis engine.")
-                return self._generate_fallback_analysis(extracted_data), "fallback-heuristic-engine"
-
-        # High fidelity fallback / mock engine if keys are not configured or set to mock
+        # 3. Built-in high-fidelity fallback engine
         logger.info("Using smart high-fidelity heuristic analysis engine.")
         return self._generate_fallback_analysis(extracted_data), "mock-high-fidelity-analyst"
 
+    async def _call_groq(self, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calls Groq's high-speed inference engine using Llama 3.3 70B Versatile
+        with strict JSON mode.
+        """
+        from groq import AsyncGroq
+
+        client = AsyncGroq(api_key=self.groq_key)
+
+        user_content = (
+            f"Website URL: {extracted_data.get('url')}\n"
+            f"Page Title: {extracted_data.get('title')}\n"
+            f"Meta Description: {extracted_data.get('meta_description')}\n"
+            f"Headings: {json.dumps(extracted_data.get('headings', {}))}\n"
+            f"Website Text Excerpt:\n{extracted_data.get('body_excerpt', '')[:15000]}"
+        )
+
+        chat_completion = await client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            model=settings.GROQ_MODEL,
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+
+        content = chat_completion.choices[0].message.content
+        cleaned_text = content.strip()
+        if cleaned_text.startswith("```json"):
+            cleaned_text = cleaned_text[7:]
+        if cleaned_text.endswith("```"):
+            cleaned_text = cleaned_text[:-3]
+
+        return json.loads(cleaned_text.strip())
+
     async def _call_gemini(self, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Calls Google Gemini API using google-genai or google-generativeai."""
+        """Calls Google Gemini API using google-generativeai."""
         import google.generativeai as genai
 
         genai.configure(api_key=self.gemini_key)
@@ -151,39 +194,6 @@ class LLMService:
             cleaned_text = cleaned_text[:-3]
 
         return json.loads(cleaned_text.strip())
-
-    async def _call_openai(self, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Calls OpenAI API with JSON mode."""
-        import httpx
-
-        user_content = (
-            f"Website URL: {extracted_data.get('url')}\n"
-            f"Page Title: {extracted_data.get('title')}\n"
-            f"Meta Description: {extracted_data.get('meta_description')}\n"
-            f"Headings: {json.dumps(extracted_data.get('headings', {}))}\n"
-            f"Website Text Excerpt:\n{extracted_data.get('body_excerpt', '')[:15000]}"
-        )
-
-        headers = {
-            "Authorization": f"Bearer {self.openai_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": settings.OPENAI_MODEL,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.2,
-        }
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"]
-            return json.loads(content)
 
     def _generate_fallback_analysis(self, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
         """
