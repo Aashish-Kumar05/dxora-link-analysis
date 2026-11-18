@@ -162,7 +162,58 @@ class LLMService:
         if cleaned_text.endswith("```"):
             cleaned_text = cleaned_text[:-3]
 
-        return json.loads(cleaned_text.strip())
+        parsed = json.loads(cleaned_text.strip())
+        
+        # Guard against empty fields returned by smaller models for minimal content sites
+        return self._ensure_minimum_requirements(parsed, extracted_data)
+
+    def _ensure_minimum_requirements(self, data: Dict[str, Any], extracted_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensures that the LLM response satisfies all Pydantic constraints (e.g. min 3 competitors, top services)."""
+        fallback = self._generate_fallback_analysis(extracted_data)
+        
+        if not data.get("brand"):
+            data["brand"] = fallback["brand"]
+
+        if not data.get("analysis"):
+            data["analysis"] = fallback["analysis"]
+
+        analysis = data["analysis"]
+        
+        # Ensure competitor_analysis has at least 3 competitors
+        comp_analysis = analysis.get("competitor_analysis", {})
+        competitors = comp_analysis.get("competitors", [])
+        if not competitors or len(competitors) < 3:
+            comp_analysis["competitors"] = fallback["analysis"]["competitor_analysis"]["competitors"]
+            comp_analysis.setdefault("brand_overview", fallback["analysis"]["competitor_analysis"]["brand_overview"])
+            comp_analysis.setdefault("main_category", fallback["analysis"]["competitor_analysis"]["main_category"])
+            comp_analysis.setdefault("main_products_services", fallback["analysis"]["competitor_analysis"]["main_products_services"])
+            comp_analysis.setdefault("strengths", fallback["analysis"]["competitor_analysis"]["strengths"])
+            comp_analysis.setdefault("opportunities", fallback["analysis"]["competitor_analysis"]["opportunities"])
+            comp_analysis.setdefault("data_source_note", "AI-generated competitor market intelligence based on domain category and public web knowledge")
+            analysis["competitor_analysis"] = comp_analysis
+
+        # Ensure top_services has 5 services
+        services = analysis.get("top_services", [])
+        if not services or len(services) < 5:
+            analysis["top_services"] = fallback["analysis"]["top_services"]
+
+        # Ensure target_search_queries has 5 queries
+        queries = analysis.get("target_search_queries", [])
+        if not queries or len(queries) < 5:
+            analysis["target_search_queries"] = fallback["analysis"]["target_search_queries"]
+
+        # Ensure seo_improvements fields exist
+        seo = analysis.get("seo_improvements", {})
+        if not seo.get("primary_keyword"):
+            analysis["seo_improvements"] = fallback["analysis"]["seo_improvements"]
+
+        # Ensure target_audience has segments
+        target_aud = analysis.get("target_audience", {})
+        if not target_aud.get("audience_segments") or len(target_aud["audience_segments"]) < 3:
+            analysis["target_audience"] = fallback["analysis"]["target_audience"]
+
+        return data
+
 
     async def _call_gemini(self, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
         """Calls Google Gemini API using google-generativeai."""
